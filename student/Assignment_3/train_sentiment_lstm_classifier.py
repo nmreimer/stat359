@@ -1,3 +1,10 @@
+# Tokenize each sentence into word tokens and retrieve the corresponding FastText word vectors.
+# Pad or truncate each sentence to exactly 32 tokens.
+# Construct a tensor of shape (32, 300) for each sentence (300 = embedding dimension).
+# Do not use nn.Embedding; instead, precompute and batch the word vectors directly.
+# Pass the sequences into an LSTM model and classify using the final hidden state.
+# Use nn.CrossEntropyLoss(weight=...) and evaluate using macro-averaged F1 score.
+
 import numpy as np
 import pandas as pd
 import datasets
@@ -19,9 +26,8 @@ from torch.utils.data import TensorDataset
 import copy
 
 num_epochs = 40
-lr = 0.001
+lr = 0.01
 batch_size = 32
-
 
 dataset = datasets.load_dataset('financial_phrasebank', 'sentences_50agree', trust_remote_code=True)
 data = pd.DataFrame(dataset['train'])
@@ -34,24 +40,22 @@ embedding_model = KeyedVectors.load(model_path, mmap='r')
 def get_device():
     return "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
-def get_mean_sentence_embeddings(sentences, model):
+def get_sentence_embeddings(sentences, model):
     embeddings = []
+    emb_dim = 300
     for sentence in sentences:
         tokens = simple_preprocess(sentence)
-        vectors = [model[token] for token in tokens if token in model.key_to_index]
-        if len(vectors) > 0:
-            mean_vec = np.mean(vectors, axis=0)
-            embeddings.append(mean_vec)
-        else:
-            embeddings.append(np.zeros(model.vector_size))
-    return np.vstack(embeddings)
+        sentence_embedding = np.zeros((32, emb_dim))
+        if len(tokens)>32:
+            tokens = tokens[:32]
+        for i, token in enumerate(tokens):
+            if token in model.key_to_index:
+                sentence_embedding[i] = model[token]
+        embeddings.append(sentence_embedding)
+    return np.array(embeddings)
 
-
-# print("\n========== Encoding Sentences as Sequences ==========")
-max_seq_len = 32
-X_seq = get_mean_sentence_embeddings(data['sentence'], embedding_model)
+X_seq = get_sentence_embeddings(data['sentence'], embedding_model)
 y = data['label'].values
-
 
 # # ========== Train/Test Split ==========
 print("\n========== Splitting Data ==========")
@@ -86,36 +90,30 @@ train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-
-
-# Train MLP Classifier
-
-class MLPClassifier(nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_classes):
-        super(MLPClassifier, self).__init__()
-        self.dropout = nn.Dropout(0.5)
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.activation1 = nn.LeakyReLU()
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.activation2 = nn.LeakyReLU()
-        self.fc3 = nn.Linear(hidden_dim, num_classes)
-    def forward(self, x):
-        x = self.activation1(self.fc1(x))
-        x = self.dropout(x)
-        x = self.activation2(self.fc2(x))
-        x = self.dropout(x)
-        x = self.fc3(x)
-        return x
-
+class LSTMClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size, num_classes, num_layers=1):
+        super(LSTMClassifier, self).__init__()
+        
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
+        self.fc = nn.Linear(hidden_size, num_classes)
+        
+    def forward(self, x):   
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        
+        out, (hn, cn) = self.lstm(x, (h0, c0))
+        out = self.fc(out[:, -1, :])
+        return out
+    
+model = LSTMClassifier(input_size=300, hidden_size=128, num_classes=3, num_layers=2)
 device = get_device()
-weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
-criterion = nn.CrossEntropyLoss(weight=weights_tensor)
-
-
-model = MLPClassifier(input_dim=300, hidden_dim=128, num_classes=3)
 model.to(device)
 
 optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+criterion = nn.CrossEntropyLoss(weight=weights_tensor)
 
 train_loss_history = []
 val_loss_history = []
@@ -223,32 +221,32 @@ epochs_range = range(1, num_epochs + 1)
 plt.figure(figsize=(10, 6))
 plt.plot(epochs_range, train_loss_history, label='Training Loss', color='blue', marker='o')
 plt.plot(epochs_range, val_loss_history, label='Validation Loss', color='orange', marker='o')
-plt.title('MLP Training and Validation Loss vs. Epochs', fontsize=16)
+plt.title('LSTM Training and Validation Loss vs. Epochs', fontsize=16)
 plt.xlabel('Epochs', fontsize=12)
 plt.ylabel('Loss', fontsize=12)
 plt.legend()
 plt.tight_layout()
-plt.savefig('student/Assignment_3/outputs/mlp_loss_curve.png', dpi=300)
+plt.savefig('student/Assignment_3/outputs/lstm_loss_curve.png', dpi=300)
 plt.close()
 
 plt.figure(figsize=(10, 6))
 plt.plot(epochs_range, train_f1_history, label='Training Macro F1', color='blue', marker='o')
 plt.plot(epochs_range, val_f1_history, label='Validation Macro F1', color='orange', marker='o')
-plt.title('MLP Training and Validation Macro F1 Score vs. Epochs', fontsize=16)
+plt.title('LSTM Training and Validation Macro F1 Score vs. Epochs', fontsize=16)
 plt.xlabel('Epochs', fontsize=12)
 plt.ylabel('Macro F1 Score', fontsize=12)
 plt.legend()
 plt.tight_layout()
-plt.savefig('student/Assignment_3/outputs/mlp_f1_curve.png', dpi=300)
+plt.savefig('student/Assignment_3/outputs/lstm_f1_curve.png', dpi=300)
 plt.close()
 
 plt.figure(figsize=(10, 6))
 plt.plot(epochs_range, train_acc_history, label='Training Accuracy', color='blue', marker='o')
 plt.plot(epochs_range, val_acc_history, label='Validation Accuracy', color='orange', marker='o')
-plt.title('MLP Training and Validation Accuracy vs. Epochs', fontsize=16)
+plt.title('LSTMTraining and Validation Accuracy vs. Epochs', fontsize=16)
 plt.xlabel('Epochs', fontsize=12)
 plt.ylabel('Accuracy', fontsize=12)
 plt.legend()
 plt.tight_layout()
-plt.savefig('student/Assignment_3/outputs/mlp_accuracy_curve.png', dpi=300)
+plt.savefig('student/Assignment_3/outputs/lstm_accuracy_curve.png', dpi=300)
 plt.close()
