@@ -192,7 +192,58 @@ for epoch in range(num_epochs):
         best_model_wts = copy.deepcopy(model.state_dict())
 
 
-# evaluation
+# ========== Plot Learning Curves ==========
+print("\n========== Plotting Learning Curves ==========")
+plt.figure(figsize=(12, 15))
+
+plt.subplot(3, 1, 1)
+plt.plot(train_loss_history, label='Train Loss')
+plt.plot(val_loss_history, label='Val Loss')
+plt.title('Loss Curve')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True)
+
+plt.subplot(3, 1, 2)
+plt.plot(train_f1_history, label='Train F1')
+plt.plot(val_f1_history, label='Val F1')
+plt.title('F1 Macro Score Curve')
+plt.xlabel('Epochs')
+plt.ylabel('F1 Score')
+plt.legend()
+plt.grid(True)
+
+plt.subplot(3, 1, 3)
+plt.plot(train_acc_history, label='Train Accuracy')
+plt.plot(val_acc_history, label='Val Accuracy')
+plt.title('Accuracy Curve')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.savefig('outputs/lstm_f1_learning_curves.png')
+plt.show()
+print("Learning curves saved as 'outputs/lstm_f1_learning_curves.png'.")
+
+# Save accuracy plot separately
+plt.figure(figsize=(8, 6))
+plt.plot(train_acc_history, label='Train Accuracy')
+plt.plot(val_acc_history, label='Val Accuracy')
+plt.title('Accuracy Curve')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig('outputs/lstm_accuracy_learning_curve.png')
+plt.show()
+print("Accuracy curve saved as 'outputs/lstm_accuracy_learning_curve.png'.")
+
+# ========== Test Evaluation ==========
+print("\n========== Evaluating on Test Set ==========")
 model.load_state_dict(best_model_wts)
 model.eval()
 all_preds = []
@@ -202,51 +253,37 @@ with torch.no_grad():
     for inputs, labels in test_loader:
         inputs = inputs.to(device)
         labels = labels.to(device)
-        
         outputs = model(inputs)
-        
         _, preds = torch.max(outputs, 1)
-        
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
 
-test_macro_f1 = f1_score(all_labels, all_preds, average='macro')
+test_acc = (np.array(all_preds) == np.array(all_labels)).mean()
+test_f1_macro = f1_score(all_labels, all_preds, average='macro')
+test_f1_weighted = f1_score(all_labels, all_preds, average='weighted')
 
-print(f"Final Test Macro F1 Score: {test_macro_f1:.4f}")
-print(classification_report(all_labels, all_preds, digits=4))
+print('\n' + '='*50)
+print(f"Final Test Accuracy: {test_acc:.4f}")
+print(f"Test F1 Macro: {test_f1_macro:.4f}")
+print(f"Test F1 Weighted: {test_f1_weighted:.4f}")
+print('='*50 + '\n')
 
-# plots
-epochs_range = range(1, num_epochs + 1)
+class_names = ['Negative (0)', 'Neutral (1)', 'Positive (2)']
+print("Classification Report:")
+print(classification_report(all_labels, all_preds, target_names=class_names, digits=4))
 
-plt.figure(figsize=(10, 6))
-plt.plot(epochs_range, train_loss_history, label='Training Loss', color='blue', marker='o')
-plt.plot(epochs_range, val_loss_history, label='Validation Loss', color='orange', marker='o')
-plt.title('LSTM Training and Validation Loss vs. Epochs', fontsize=16)
-plt.xlabel('Epochs', fontsize=12)
-plt.ylabel('Loss', fontsize=12)
-plt.legend()
-plt.tight_layout()
-plt.savefig('student/Assignment_3/outputs/lstm_loss_curve.png', dpi=300)
-plt.close()
+cm = confusion_matrix(all_labels, all_preds)
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=class_names, yticklabels=class_names)
+plt.ylabel('True Label')
+plt.xlabel('Predicted Label')
+plt.title('Confusion Matrix')
+plt.savefig('outputs/lstm_confusion_matrix.png')
+plt.show()
+print("Confusion matrix saved as 'outputs/lstm_confusion_matrix.png'.")
 
-plt.figure(figsize=(10, 6))
-plt.plot(epochs_range, train_f1_history, label='Training Macro F1', color='blue', marker='o')
-plt.plot(epochs_range, val_f1_history, label='Validation Macro F1', color='orange', marker='o')
-plt.title('LSTM Training and Validation Macro F1 Score vs. Epochs', fontsize=16)
-plt.xlabel('Epochs', fontsize=12)
-plt.ylabel('Macro F1 Score', fontsize=12)
-plt.legend()
-plt.tight_layout()
-plt.savefig('student/Assignment_3/outputs/lstm_f1_curve.png', dpi=300)
-plt.close()
-
-plt.figure(figsize=(10, 6))
-plt.plot(epochs_range, train_acc_history, label='Training Accuracy', color='blue', marker='o')
-plt.plot(epochs_range, val_acc_history, label='Validation Accuracy', color='orange', marker='o')
-plt.title('LSTMTraining and Validation Accuracy vs. Epochs', fontsize=16)
-plt.xlabel('Epochs', fontsize=12)
-plt.ylabel('Accuracy', fontsize=12)
-plt.legend()
-plt.tight_layout()
-plt.savefig('student/Assignment_3/outputs/lstm_accuracy_curve.png', dpi=300)
-plt.close()
+print("\nPer-class F1 Scores:")
+for i, name in enumerate(class_names):
+    class_f1 = f1_score(all_labels, all_preds, labels=[i], average='macro')
+    print(f"{name}: {class_f1:.4f}")
