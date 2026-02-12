@@ -3,3 +3,7 @@
 *.model
 *.npy
 __pycache__
+
+# Exception: track outputs folder for submission
+!outputs/
+!outputs/**
