@@ -228,7 +228,7 @@ plt.legend()
 plt.grid(True)
 plt.tight_layout()
 plt.savefig('outputs/gru_f1_learning_curves.png')
-plt.show()
+# plt.show()  # Commented out to prevent display, plots are saved instead
 print("Learning curves saved as 'outputs/gru_f1_learning_curves.png'.")
 
 # Save accuracy plot separately
@@ -242,7 +242,7 @@ plt.legend()
 plt.grid(True)
 plt.tight_layout()
 plt.savefig('outputs/gru_accuracy_learning_curve.png')
-plt.show()
+# plt.show()  # Commented out to prevent display, plots are saved instead
 print("Accuracy curve saved as 'outputs/gru_accuracy_learning_curve.png'.")
 
 # ========== Test Evaluation ==========
@@ -276,12 +276,36 @@ plt.ylabel('True Label')
 plt.xlabel('Predicted Label')
 plt.title('Confusion Matrix')
 plt.savefig('outputs/gru_confusion_matrix.png')
-plt.show()
+# plt.show()  # Commented out to prevent display, plots are saved instead
 print("Confusion matrix saved as 'outputs/gru_confusion_matrix.png'.")
 print("\nPer-class F1 Scores:")
+per_class_f1 = f1_score(all_labels, all_preds, average=None)
 for i, name in enumerate(class_names):
-    class_f1 = f1_score(all_labels, all_preds, labels=[i], average='macro')
+    class_f1 = per_class_f1[i]
     print(f"{name}: {class_f1:.4f}")
+
+# Save results to CSV for model comparison
+print("\n========== Saving Results to CSV ==========")
+results_df = pd.DataFrame({
+    'model': ['GRU'],
+    'macro_f1': [test_f1_macro],
+    'f1_negative': [per_class_f1[0]],
+    'f1_neutral': [per_class_f1[1]],
+    'f1_positive': [per_class_f1[2]]
+})
+
+csv_path = 'outputs/model_performance.csv'
+# Check if CSV exists and append or create new
+if os.path.exists(csv_path):
+    existing_df = pd.read_csv(csv_path)
+    # Remove existing row for this model if it exists
+    existing_df = existing_df[existing_df['model'] != 'GRU']
+    results_df = pd.concat([existing_df, results_df], ignore_index=True)
+else:
+    os.makedirs('outputs', exist_ok=True)
+
+results_df.to_csv(csv_path, index=False)
+print(f"Results saved to {csv_path}")
 
 print("\n========== Script Complete ==========")
 # End of script

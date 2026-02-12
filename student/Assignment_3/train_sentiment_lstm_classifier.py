@@ -1,10 +1,3 @@
-# Tokenize each sentence into word tokens and retrieve the corresponding FastText word vectors.
-# Pad or truncate each sentence to exactly 32 tokens.
-# Construct a tensor of shape (32, 300) for each sentence (300 = embedding dimension).
-# Do not use nn.Embedding; instead, precompute and batch the word vectors directly.
-# Pass the sequences into an LSTM model and classify using the final hidden state.
-# Use nn.CrossEntropyLoss(weight=...) and evaluate using macro-averaged F1 score.
-
 import numpy as np
 import pandas as pd
 import datasets
@@ -26,8 +19,8 @@ from torch.utils.data import TensorDataset
 import copy
 
 num_epochs = 40
-lr = 0.01
-batch_size = 32
+lr = 0.0005
+batch_size = 64
 
 dataset = datasets.load_dataset('financial_phrasebank', 'sentences_50agree', trust_remote_code=True)
 data = pd.DataFrame(dataset['train'])
@@ -96,7 +89,8 @@ class LSTMClassifier(nn.Module):
         
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0)
+        self.dropout = nn.Dropout(0.5)
         self.fc = nn.Linear(hidden_size, num_classes)
         
     def forward(self, x):   
@@ -104,7 +98,9 @@ class LSTMClassifier(nn.Module):
         c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
         
         out, (hn, cn) = self.lstm(x, (h0, c0))
-        out = self.fc(out[:, -1, :])
+        out = out.mean(dim=1) # mean pooling
+        out = self.dropout(out)
+        out = self.fc(out)
         return out
     
 model = LSTMClassifier(input_size=300, hidden_size=128, num_classes=3, num_layers=2)
@@ -187,7 +183,7 @@ for epoch in range(num_epochs):
     print(f"Train Loss: {epoch_train_loss:.4f} | Train Macro F1: {epoch_train_f1:.4f} | Train Acc: {epoch_train_acc:.4f}")
     print(f"Val   Loss: {epoch_val_loss:.4f} | Val   Macro F1: {epoch_val_f1:.4f} | Val   Acc: {epoch_val_acc:.4f}")
 
-    if epoch_val_f1 > best_val_f1:
+    if epoch_val_f1 > best_val_f1 and epoch > 29:
         best_val_f1 = epoch_val_f1
         best_model_wts = copy.deepcopy(model.state_dict())
 
@@ -224,9 +220,9 @@ plt.legend()
 plt.grid(True)
 
 plt.tight_layout()
-plt.savefig('outputs/lstm_f1_learning_curves.png')
-plt.show()
-print("Learning curves saved as 'outputs/lstm_f1_learning_curves.png'.")
+plt.savefig('student/Assignment_3/outputs/lstm_f1_learning_curves.png')
+# plt.show()  # Commented out to prevent display, plots are saved instead
+
 
 # Save accuracy plot separately
 plt.figure(figsize=(8, 6))
@@ -238,9 +234,9 @@ plt.ylabel('Accuracy')
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
-plt.savefig('outputs/lstm_accuracy_learning_curve.png')
-plt.show()
-print("Accuracy curve saved as 'outputs/lstm_accuracy_learning_curve.png'.")
+plt.savefig('student/Assignment_3/outputs/lstm_accuracy_learning_curve.png')
+# plt.show()  # Commented out to prevent display, plots are saved instead
+
 
 # ========== Test Evaluation ==========
 print("\n========== Evaluating on Test Set ==========")
@@ -279,11 +275,35 @@ sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
 plt.ylabel('True Label')
 plt.xlabel('Predicted Label')
 plt.title('Confusion Matrix')
-plt.savefig('outputs/lstm_confusion_matrix.png')
-plt.show()
-print("Confusion matrix saved as 'outputs/lstm_confusion_matrix.png'.")
+plt.savefig('student/Assignment_3/outputs/lstm_confusion_matrix.png')
+# plt.show()  # Commented out to prevent display, plots are saved instead
+
 
 print("\nPer-class F1 Scores:")
+per_class_f1 = f1_score(all_labels, all_preds, average=None)
 for i, name in enumerate(class_names):
-    class_f1 = f1_score(all_labels, all_preds, labels=[i], average='macro')
+    class_f1 = per_class_f1[i]
     print(f"{name}: {class_f1:.4f}")
+
+# Save results to CSV for model comparison
+print("\n========== Saving Results to CSV ==========")
+results_df = pd.DataFrame({
+    'model': ['LSTM'],
+    'macro_f1': [test_f1_macro],
+    'f1_negative': [per_class_f1[0]],
+    'f1_neutral': [per_class_f1[1]],
+    'f1_positive': [per_class_f1[2]]
+})
+
+csv_path = 'student/Assignment_3/outputs/model_performance.csv'
+# Check if CSV exists and append or create new
+if os.path.exists(csv_path):
+    existing_df = pd.read_csv(csv_path)
+    # Remove existing row for this model if it exists
+    existing_df = existing_df[existing_df['model'] != 'LSTM']
+    results_df = pd.concat([existing_df, results_df], ignore_index=True)
+else:
+    os.makedirs('student/Assignment_3/outputs', exist_ok=True)
+
+results_df.to_csv(csv_path, index=False)
+print(f"Results saved to {csv_path}")
